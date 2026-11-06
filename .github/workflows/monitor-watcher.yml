@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
       - name: Look for monitor deals
         env:
-          MAX_PRICE: "150"
+          MAX_PRICE: "215"
           MAX_AGE_HOURS: "24"
           BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
           # Uses MONITOR_DISCORD_WEBHOOK if you made one, otherwise your existing webhook
