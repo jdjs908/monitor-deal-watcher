@@ -1,0 +1,34 @@
+name: Monitor One-Time Backtest
+
+# Run by hand: Actions tab -> "Monitor One-Time Backtest" -> Run workflow.
+# Never changes your "already seen" list. Tick the box to ALSO post matches to Discord (max 8).
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_to_discord:
+        description: "Also send the qualifying listings to Discord?"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run backtest
+        env:
+          MAX_PRICE: "150"
+          MAX_AGE_HOURS: "24"
+          BACKTEST_SEND: ${{ inputs.send_to_discord }}
+          BACKTEST_MAX_ALERTS: "8"
+          BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+          DISCORD_WEBHOOK: ${{ secrets.MONITOR_DISCORD_WEBHOOK || secrets.DISCORD_WEBHOOK }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python gaming_monitor_deal_watcher.py --backtest
