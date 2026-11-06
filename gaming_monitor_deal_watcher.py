@@ -208,15 +208,18 @@ def rate_monitor(title):
     size, hz, res, panel = parse_size(title), parse_hz(title), parse_res(title), parse_panel(title)
     hdr = parse_hdr(title)
     ultra = bool(ULTRAWIDE_RE.search(title))
-    res_s = {"4K": 10.0, "QHD": 8.0 if ultra else 7.5}.get(res, 6.0)
+    # Resolution and refresh rate drive the grade (90% of it): higher res + higher Hz = higher score.
+    res_s = {"4K": 9.5, "QHD": 6.5 if ultra else 6.0}.get(res, 6.0)          # unknown -> assume plain QHD
+    if res == "4K" and re.search(r"\b5K\b|\b8K\b|5120\s?[x×*]\s?2880", title, re.I):
+        res_s = 10.0
     if hz is None:
-        hz_s = 6.0
+        hz_s = 5.0                                                          # unknown -> assume the 120Hz minimum
     else:
-        hz_s = next(sc for lim, sc in ((360, 10), (240, 9.5), (180, 9), (165, 8.5), (144, 8), (120, 7), (0, 3)) if hz >= lim)
+        hz_s = next(sc for lim, sc in ((360, 10), (240, 9.5), (180, 8.0), (165, 7.5), (144, 6.5), (120, 5.0), (0, 2.0)) if hz >= lim)
     panel_s = panel[1] if panel else 6.5
     size_s = 6.5 if size is None else 9.0 if size >= 34 else 8.5 if size >= 32 else 8.0 if size >= 31 else 7.0
     hdr_s = hdr[1] if hdr and hdr[0] != "NO" else 5.0
-    score = round(0.30 * res_s + 0.25 * hz_s + 0.20 * panel_s + 0.10 * size_s + 0.15 * hdr_s, 1)
+    score = round(0.50 * res_s + 0.40 * hz_s + 0.04 * panel_s + 0.03 * hdr_s + 0.03 * size_s, 1)
     found = []
     if size:
         found.append(f'{size:g}"')
@@ -242,7 +245,8 @@ def rating_lines(r):
         lines.append("Specs read from title: " + ", ".join(r["found"]))
     if r.get("hdr_basic"):
         lines.append("ℹ️ HDR is listed without a DisplayHDR level, which often means basic HDR support. DisplayHDR 400+ is the real minimum.")
-    lines.append("(Score is a spec-based guide only. It doesn't measure brand quality or color accuracy.)")
+    lines.append("(Score is mostly resolution + refresh rate: higher of both = higher grade. Panel, HDR and size add a little. "
+                 "It doesn't measure brand quality or color accuracy.)")
     return lines
 
 
