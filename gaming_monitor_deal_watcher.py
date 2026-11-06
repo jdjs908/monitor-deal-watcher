@@ -5,7 +5,8 @@ Finds monitor deals that meet your rules and alerts you on Discord (and/or ntfy)
   - 27 inches or bigger
   - 120Hz or faster
   - QHD (1440p) or better, with 4K flagged and listed first
-  - $150 or less
+  - HDR support
+  - $215 or less
 Every alert shows a 1-10 monitor score, so you can compare deals at a glance.
 
 Sources
@@ -25,7 +26,7 @@ Usage
   python gaming_monitor_deal_watcher.py --backtest --send   # same, and post matches to Discord
 
 Settings (environment variables, all optional)
-  MAX_PRICE=150  MAX_AGE_HOURS=24  CHECK_MINUTES=15
+  MAX_PRICE=215  MAX_AGE_HOURS=24  CHECK_MINUTES=15
   BESTBUY_API_KEY=...  NTFY_TOPIC=...  DISCORD_WEBHOOK=...
 """
 import html
@@ -42,7 +43,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 # ---- your rules
-MAX_PRICE = float(os.getenv("MAX_PRICE", "150"))
+MAX_PRICE = float(os.getenv("MAX_PRICE", "215"))
 MIN_PRICE = 60.0          # ignore tiny numbers like "$25 off" or accessories
 MIN_INCHES = 27
 MIN_HZ = 120
@@ -63,6 +64,8 @@ RES_QHD_RE = re.compile(
     r"\bQHD\b|\bWQHD\b|\bUWQHD\b|\bDQHD\b|\bWQXGA\b|\b1440p\b|2560\s?[x×*]\s?1440|3440\s?[x×*]\s?1440|5120\s?[x×*]\s?1440", re.I)
 RES_FHD_RE = re.compile(r"\bFHD\b|\bWFHD\b|\b1080p\b|1920\s?[x×*]\s?1080|2560\s?[x×*]\s?1080|Full\s?HD", re.I)
 ULTRAWIDE_RE = re.compile(r"ultra-?wide|\bUWQHD\b|3440\s?[x×*]\s?1440|5120\s?[x×*]\s?1440|\b21:9\b|\b32:9\b", re.I)
+HDR_RE = re.compile(r"\bHDR\b|HDR\s?10|DisplayHDR|HDR\s?(?:400|600|1000|1400)|Dolby Vision", re.I)
+NO_HDR_RE = re.compile(r"\b(?:no|non|without)[- ]HDR\b", re.I)
 PANEL_RES = [("OLED", re.compile(r"\bOLED\b", re.I), 10.0), ("Mini-LED", re.compile(r"mini[- ]?LED", re.I), 9.0),
              ("IPS", re.compile(r"\bIPS\b", re.I), 8.5), ("VA", re.compile(r"\bVA\b", re.I), 7.5),
              ("TN", re.compile(r"\bTN\b", re.I), 5.5)]
@@ -146,6 +149,18 @@ def parse_panel(t):
     return None
 
 
+def parse_hdr(t):
+    """None = HDR not mentioned. ('NO', 0) = title says no HDR. Otherwise (label, score)."""
+    if NO_HDR_RE.search(t):
+        return ("NO", 0.0)
+    if not HDR_RE.search(t):
+        return None
+    for level, sc in ((1400, 10.0), (1000, 10.0), (600, 9.0), (400, 7.5)):
+        if re.search(rf"HDR\s?{level}\b", t, re.I):
+            return (f"DisplayHDR {level}", sc)
+    return ("HDR", 5.5)   # HDR named without a certified level: usually basic HDR support
+
+
 def age_text(posted):
     if not posted:
         return ""
@@ -178,6 +193,11 @@ def check_requirements(t):
         unknown.append("resolution (needs QHD+)")
     elif res == "FHD":
         fails.append("1080p resolution")
+    hdr = parse_hdr(t)
+    if hdr and hdr[0] == "NO":
+        fails.append("no HDR")
+    elif hdr is None:
+        unknown.append("HDR support (needs HDR)")
     if not parse_panel(t):
         unknown.append("panel type (IPS/VA/OLED)")
     return fails, unknown
@@ -186,6 +206,7 @@ def check_requirements(t):
 # ------------------------------------------------------------------ scoring
 def rate_monitor(title):
     size, hz, res, panel = parse_size(title), parse_hz(title), parse_res(title), parse_panel(title)
+    hdr = parse_hdr(title)
     ultra = bool(ULTRAWIDE_RE.search(title))
     res_s = {"4K": 10.0, "QHD": 8.0 if ultra else 7.5}.get(res, 6.0)
     if hz is None:
@@ -194,7 +215,8 @@ def rate_monitor(title):
         hz_s = next(sc for lim, sc in ((360, 10), (240, 9.5), (180, 9), (165, 8.5), (144, 8), (120, 7), (0, 3)) if hz >= lim)
     panel_s = panel[1] if panel else 6.5
     size_s = 6.5 if size is None else 9.0 if size >= 34 else 8.5 if size >= 32 else 8.0 if size >= 31 else 7.0
-    score = round(0.35 * res_s + 0.30 * hz_s + 0.25 * panel_s + 0.10 * size_s, 1)
+    hdr_s = hdr[1] if hdr and hdr[0] != "NO" else 5.0
+    score = round(0.30 * res_s + 0.25 * hz_s + 0.20 * panel_s + 0.10 * size_s + 0.15 * hdr_s, 1)
     found = []
     if size:
         found.append(f'{size:g}"')
@@ -204,18 +226,22 @@ def rate_monitor(title):
         found.append(f"{hz}Hz")
     if panel:
         found.append(panel[0])
+    if hdr and hdr[0] != "NO":
+        found.append(hdr[0])
     if ultra:
         found.append("ultrawide")
-    return {"score": score, "parts": {"res": res_s, "hz": hz_s, "panel": panel_s, "size": size_s},
-            "found": found, "is4k": res == "4K"}
+    return {"score": score, "parts": {"res": res_s, "hz": hz_s, "panel": panel_s, "size": size_s, "hdr": hdr_s},
+            "found": found, "is4k": res == "4K", "hdr_basic": bool(hdr and hdr[0] == "HDR")}
 
 
 def rating_lines(r):
     p = r["parts"]
     lines = [f"**Monitor score: {r['score']}/10**  (resolution {p['res']:.1f} · refresh {p['hz']:.1f} · "
-             f"panel {p['panel']:.1f} · size {p['size']:.1f})"]
+             f"panel {p['panel']:.1f} · size {p['size']:.1f} · HDR {p['hdr']:.1f})"]
     if r["found"]:
         lines.append("Specs read from title: " + ", ".join(r["found"]))
+    if r.get("hdr_basic"):
+        lines.append("ℹ️ HDR is listed without a DisplayHDR level, which often means basic HDR support. DisplayHDR 400+ is the real minimum.")
     lines.append("(Score is a spec-based guide only. It doesn't measure brand quality or color accuracy.)")
     return lines
 
@@ -418,15 +444,17 @@ def check_once():
 
 # ---------------------------------------------------------------- backtest
 SELF_CHECK_CASES = [
-    ('Samsung 27" Odyssey G5 QHD 1440p 165Hz Curved Gaming Monitor', 139, True),
-    ('LG 32" UltraGear 4K UHD 144Hz IPS Gaming Monitor', 149, True),
-    ('MSI 27" 4K 160Hz Rapid IPS Gaming Monitor (Refurbished)', 149, True),
-    ('Acer 34" UWQHD 3440x1440 165Hz VA Ultrawide Gaming Monitor', 139, True),
-    ('27" gaming monitor 165Hz', 119, True),                                   # size/res partly unknown -> verify
+    ('Samsung 27" Odyssey G5 QHD 1440p 165Hz HDR10 Curved Gaming Monitor', 189, True),
+    ('LG 32" UltraGear 4K UHD 144Hz IPS DisplayHDR 400 Gaming Monitor', 209, True),
+    ('MSI 27" 4K 160Hz Rapid IPS HDR Gaming Monitor (Refurbished)', 199, True),
+    ('Acer 34" UWQHD 3440x1440 165Hz VA HDR400 Ultrawide Gaming Monitor', 179, True),
+    ('27" gaming monitor 165Hz', 119, True),                                   # size/res/HDR partly unknown -> verify
+    ('Samsung 27" QHD 165Hz IPS Gaming Monitor', 169, True),                    # no HDR mentioned -> verify
+    ('Sceptre 27" QHD 165Hz Gaming Monitor (No HDR)', 129, False),              # says no HDR
     ('AOC 27" 1080p 240Hz Gaming Monitor', 99, False),                          # 1080p
     ('Acer 24.5" QHD 180Hz Gaming Monitor', 119, False),                        # too small
     ('KOORUI 27" QHD 100Hz IPS Monitor', 109, False),                           # under 120Hz
-    ('Gigabyte 27" QHD 165Hz IPS Gaming Monitor', 179, False),                  # over price
+    ('Gigabyte 27" QHD 165Hz IPS HDR Gaming Monitor', 239, False),              # over price
     ('Samsung 43" 4K 144Hz Smart TV', 149, False),                              # TV
     ('VIVO Dual Monitor Desk Mount fits 13 to 32 inch screens', 79, False),     # accessory
     ('ASUS ROG Strix RTX 5070 gaming PC with 27" monitor 165Hz QHD', 129, False),  # PC bundle
@@ -483,8 +511,8 @@ def backtest():
             if batch:
                 out.append(f"Sent **{len(batch)}** of {len(alerts)} qualifying listings (cap {limit}). Check your Discord channel.")
             else:
-                t = 'LG 32" UltraGear 4K UHD 144Hz IPS Gaming Monitor'
-                notify({"source": "Test (sample alert)", "title": t, "price": 149, "was": 279, "url": "https://example.com",
+                t = 'LG 32" UltraGear 4K UHD 144Hz IPS DisplayHDR 400 Gaming Monitor'
+                notify({"source": "Test (sample alert)", "title": t, "price": 199, "was": 279, "url": "https://example.com",
                         "rating": rate_monitor(t), "prefix": banner, "verify": check_requirements(t)[1]})
                 out.append("No real listings qualified, so one built-in SAMPLE alert was sent instead. Check your Discord channel.")
     out += ["", "### ❌ Dropped"]
@@ -505,8 +533,8 @@ def backtest():
 
 def main():
     if "--test" in sys.argv:
-        t = 'LG 32" UltraGear 4K UHD 144Hz IPS Gaming Monitor'
-        notify({"source": "Test (sample alert)", "title": t, "price": 149, "was": 279, "url": "https://example.com",
+        t = 'LG 32" UltraGear 4K UHD 144Hz IPS DisplayHDR 400 Gaming Monitor'
+        notify({"source": "Test (sample alert)", "title": t, "price": 199, "was": 279, "url": "https://example.com",
                 "ship": "🚚 Ships to you - FREE shipping", "rating": rate_monitor(t), "verify": check_requirements(t)[1]})
         return
     if "--backtest" in sys.argv:
@@ -515,7 +543,7 @@ def main():
     if "--once" in sys.argv:
         check_once()
         return
-    print(f"Watching for 27\"+ / 120Hz+ / QHD+ monitors <= ${MAX_PRICE:,.0f} every {CHECK_MINUTES:g} min. Ctrl+C to stop.")
+    print(f"Watching for 27\"+ / 120Hz+ / QHD+ / HDR monitors <= ${MAX_PRICE:,.0f} every {CHECK_MINUTES:g} min. Ctrl+C to stop.")
     while True:
         try:
             check_once()
