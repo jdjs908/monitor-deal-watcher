@@ -24,7 +24,7 @@ jobs:
           python-version: "3.12"
       - name: Run backtest
         env:
-          MAX_PRICE: "150"
+          MAX_PRICE: "215"
           MAX_AGE_HOURS: "24"
           BACKTEST_SEND: ${{ inputs.send_to_discord }}
           BACKTEST_MAX_ALERTS: "8"
