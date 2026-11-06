@@ -1,0 +1,41 @@
+name: Gaming Monitor Deal Watcher
+
+on:
+  schedule:
+    - cron: "5,20,35,50 * * * *"   # every 15 min (offset so it doesn't collide with the PC watcher)
+  workflow_dispatch:                # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: monitor-watcher
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Look for monitor deals
+        env:
+          MAX_PRICE: "150"
+          MAX_AGE_HOURS: "24"
+          BESTBUY_API_KEY: ${{ secrets.BESTBUY_API_KEY }}
+          # Uses MONITOR_DISCORD_WEBHOOK if you made one, otherwise your existing webhook
+          DISCORD_WEBHOOK: ${{ secrets.MONITOR_DISCORD_WEBHOOK || secrets.DISCORD_WEBHOOK }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: python gaming_monitor_deal_watcher.py --once
+      - name: Remember which deals were already sent
+        run: |
+          git config user.name "deal-bot"
+          git config user.email "deal-bot@users.noreply.github.com"
+          git add seen_monitor_deals.json || true
+          if ! git diff --cached --quiet; then
+            git commit -m "update seen monitor deals"
+            git pull --rebase origin main
+            git push
+          fi
