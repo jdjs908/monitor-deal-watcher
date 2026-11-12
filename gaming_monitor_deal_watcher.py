@@ -4,10 +4,11 @@ Gaming Monitor Deal Watcher
 Finds monitor deals that meet your rules and alerts you on Discord (and/or ntfy):
   - 27 inches or bigger
   - 120Hz or faster
-  - QHD (1440p) or better, with 4K flagged and listed first
+  - QHD (1440p) or better (4K and ultrawide flagged)
   - HDR support
   - $215 or less
-Every alert shows a 1-10 monitor score, so you can compare deals at a glance.
+Every alert shows a 1-10 monitor score (resolution + refresh rate + size + ultrawide + price;
+any 4K monitor at 160Hz+ is a 10).
 
 Sources
   1. Best Buy official Products API (free key: https://developer.bestbuy.com)
@@ -204,22 +205,35 @@ def check_requirements(t):
 
 
 # ------------------------------------------------------------------ scoring
-def rate_monitor(title):
-    size, hz, res, panel = parse_size(title), parse_hz(title), parse_res(title), parse_panel(title)
+def rate_monitor(title, price=None):
+    """1-10 score from resolution, refresh rate, size, ultrawide and PRICE.
+    Special rule: any 4K monitor at 160Hz or higher is a 10/10."""
+    size, hz, res = parse_size(title), parse_hz(title), parse_res(title)
     hdr = parse_hdr(title)
     ultra = bool(ULTRAWIDE_RE.search(title))
-    # Resolution and refresh rate drive the grade (90% of it): higher res + higher Hz = higher score.
-    res_s = {"4K": 9.5, "QHD": 6.5 if ultra else 6.0}.get(res, 6.0)          # unknown -> assume plain QHD
+    # resolution: 4K only edges out 1440p (it isn't a big boost on its own)
+    res_s = {"4K": 9.0, "QHD": 8.0}.get(res, 5.0)                 # unknown -> can't confirm the main rule
     if res == "4K" and re.search(r"\b5K\b|\b8K\b|5120\s?[x×*]\s?2880", title, re.I):
         res_s = 10.0
+    # refresh rate
     if hz is None:
-        hz_s = 5.0                                                          # unknown -> assume the 120Hz minimum
+        hz_s = 5.0
     else:
-        hz_s = next(sc for lim, sc in ((360, 10), (240, 9.5), (180, 8.0), (165, 7.5), (144, 6.5), (120, 5.0), (0, 2.0)) if hz >= lim)
-    panel_s = panel[1] if panel else 6.5
-    size_s = 6.5 if size is None else 9.0 if size >= 34 else 8.5 if size >= 32 else 8.0 if size >= 31 else 7.0
-    hdr_s = hdr[1] if hdr and hdr[0] != "NO" else 5.0
-    score = round(0.50 * res_s + 0.40 * hz_s + 0.04 * panel_s + 0.03 * hdr_s + 0.03 * size_s, 1)
+        hz_s = next(sc for lim, sc in ((360, 10), (240, 9.5), (180, 8.5), (165, 8.0), (144, 7.0), (120, 6.0), (0, 2.0)) if hz >= lim)
+    # screen size and ultrawide shape (ultrawide is a bonus, never required)
+    size_s = 6.0 if size is None else 10.0 if size >= 34 else 8.5 if size >= 31 else 7.5 if size >= 28 else 7.0
+    wide_s = 10.0 if ultra else 7.0
+    # price: $100 or less = 10, sliding to 6 at the $215 cap
+    if price is None:
+        value_s = 7.0
+    elif price <= 100:
+        value_s = 10.0
+    else:
+        value_s = max(5.0, 10.0 - (price - 100) * (4.0 / (MAX_PRICE - 100)))
+    score = 0.30 * res_s + 0.30 * hz_s + 0.15 * size_s + 0.10 * wide_s + 0.15 * value_s
+    perfect = res == "4K" and hz is not None and hz >= 160
+    score = 10.0 if perfect else round(min(10.0, score), 1)
+    panel = parse_panel(title)
     found = []
     if size:
         found.append(f'{size:g}"')
@@ -233,20 +247,21 @@ def rate_monitor(title):
         found.append(hdr[0])
     if ultra:
         found.append("ultrawide")
-    return {"score": score, "parts": {"res": res_s, "hz": hz_s, "panel": panel_s, "size": size_s, "hdr": hdr_s},
-            "found": found, "is4k": res == "4K", "hdr_basic": bool(hdr and hdr[0] == "HDR")}
+    return {"score": score, "parts": {"res": res_s, "hz": hz_s, "size": size_s, "wide": wide_s, "price": value_s},
+            "found": found, "is4k": res == "4K", "ultra": ultra, "perfect": perfect, "hdr_basic": bool(hdr and hdr[0] == "HDR")}
 
 
 def rating_lines(r):
     p = r["parts"]
-    lines = [f"**Monitor score: {r['score']}/10**  (resolution {p['res']:.1f} · refresh {p['hz']:.1f} · "
-             f"panel {p['panel']:.1f} · size {p['size']:.1f} · HDR {p['hdr']:.1f})"]
+    lines = [f"**Monitor score: {r['score']}/10**" + (" 🏆 4K at 160Hz+ = perfect" if r["perfect"] else "") +
+             f"  (resolution {p['res']:.1f} · refresh {p['hz']:.1f} · size {p['size']:.1f} · "
+             f"ultrawide {p['wide']:.1f} · price {p['price']:.1f})"]
     if r["found"]:
         lines.append("Specs read from title: " + ", ".join(r["found"]))
     if r.get("hdr_basic"):
         lines.append("ℹ️ HDR is listed without a DisplayHDR level, which often means basic HDR support. DisplayHDR 400+ is the real minimum.")
-    lines.append("(Score is mostly resolution + refresh rate: higher of both = higher grade. Panel, HDR and size add a little. "
-                 "It doesn't measure brand quality or color accuracy.)")
+    lines.append("(Score weighs resolution, refresh rate, size, ultrawide and price. Any 4K at 160Hz+ is a 10. "
+                 "Unlisted resolution or refresh scores low. It doesn't measure brand quality or color accuracy.)")
     return lines
 
 
@@ -361,6 +376,8 @@ def notify(deal):
         lines.insert(0, deal["prefix"])
     if r and r["is4k"]:
         lines.insert(1 if deal.get("prefix") else 0, "🌟 **4K MONITOR** 🌟")
+    if r and r["ultra"]:
+        lines.insert(1 if deal.get("prefix") else 0, "↔️ **ULTRAWIDE** ↔️")
     if deal.get("ship"):
         lines.append(deal["ship"])
     if REFURB_RE.search(deal["title"]):
@@ -409,8 +426,8 @@ def evaluate(title, price):
 def check_once():
     state = load_state()
     candidates = fetch_bestbuy() + fetch_slickdeals()
-    # confirmed shipping first; 4K before QHD within that
-    candidates.sort(key=lambda d: (d.get("rank", 2), 0 if parse_res(d["title"]) == "4K" else 1))
+    # confirmed shipping first; highest score first within that
+    candidates.sort(key=lambda d: (d.get("rank", 2), -rate_monitor(d["title"], d.get("price"))["score"]))
     seen_this_run, new = set(), 0
     drops = {"not a qualifying monitor": 0, "price outside range": 0, "broke a rule": 0}
     for d in candidates:
@@ -435,7 +452,7 @@ def check_once():
         if d["source"] == "Slickdeals" and slickdeals_expired(d["url"]):
             state[d["id"]] = entry
             continue
-        d["rating"] = rate_monitor(d["title"])
+        d["rating"] = rate_monitor(d["title"], d["price"])
         notify(d)
         state[d["id"]] = entry
         save_state(state)
@@ -492,7 +509,7 @@ def backtest():
                f"older posts its search feed returns). **{len(alerts)}** would have alerted.")
     out += ["", f"### ✅ Would alert ({len(alerts)})", ""]
     for d, unknown in alerts:
-        r = rate_monitor(d["title"])
+        r = rate_monitor(d["title"], d["price"])
         old = ""
         if d.get("posted") and (datetime.now(timezone.utc) - d["posted"]).total_seconds() > MAX_AGE_HOURS * 3600:
             old = f" ⏳ older than {MAX_AGE_HOURS:g}h, so a live run would skip it"
@@ -507,9 +524,9 @@ def backtest():
         else:
             limit = int(os.getenv("BACKTEST_MAX_ALERTS", "8"))
             banner = "🧪 BACKTEST - old listing sent only to test your alerts; it may have expired"
-            batch = sorted(alerts, key=lambda a: (a[0].get("rank", 2), 0 if parse_res(a[0]["title"]) == "4K" else 1))[:limit]
+            batch = sorted(alerts, key=lambda a: (a[0].get("rank", 2), -rate_monitor(a[0]["title"], a[0]["price"])["score"]))[:limit]
             for d, unknown in batch:
-                d.update(rating=rate_monitor(d["title"]), verify=unknown, prefix=banner)
+                d.update(rating=rate_monitor(d["title"], d["price"]), verify=unknown, prefix=banner)
                 notify(d)
                 time.sleep(1.5)
             if batch:
@@ -517,7 +534,7 @@ def backtest():
             else:
                 t = 'LG 32" UltraGear 4K UHD 144Hz IPS DisplayHDR 400 Gaming Monitor'
                 notify({"source": "Test (sample alert)", "title": t, "price": 199, "was": 279, "url": "https://example.com",
-                        "rating": rate_monitor(t), "prefix": banner, "verify": check_requirements(t)[1]})
+                        "rating": rate_monitor(t, 199), "prefix": banner, "verify": check_requirements(t)[1]})
                 out.append("No real listings qualified, so one built-in SAMPLE alert was sent instead. Check your Discord channel.")
     out += ["", "### ❌ Dropped"]
     for group, items in sorted(drops.items(), key=lambda kv: -len(kv[1])):
@@ -539,7 +556,7 @@ def main():
     if "--test" in sys.argv:
         t = 'LG 32" UltraGear 4K UHD 144Hz IPS DisplayHDR 400 Gaming Monitor'
         notify({"source": "Test (sample alert)", "title": t, "price": 199, "was": 279, "url": "https://example.com",
-                "ship": "🚚 Ships to you - FREE shipping", "rating": rate_monitor(t), "verify": check_requirements(t)[1]})
+                "ship": "🚚 Ships to you - FREE shipping", "rating": rate_monitor(t, 199), "verify": check_requirements(t)[1]})
         return
     if "--backtest" in sys.argv:
         backtest()
