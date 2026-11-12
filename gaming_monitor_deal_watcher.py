@@ -6,7 +6,7 @@ Finds monitor deals that meet your rules and alerts you on Discord (and/or ntfy)
   - 120Hz or faster
   - QHD (1440p) or better (4K and ultrawide flagged)
   - HDR support
-  - $215 or less
+  - $175 or less
 Every alert shows a 1-10 monitor score (resolution + refresh rate + size + ultrawide + price;
 any 4K monitor at 160Hz+ is a 10).
 
@@ -44,7 +44,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 # ---- your rules
-MAX_PRICE = float(os.getenv("MAX_PRICE", "215"))
+MAX_PRICE = float(os.getenv("MAX_PRICE", "175"))
 MIN_PRICE = 60.0          # ignore tiny numbers like "$25 off" or accessories
 MIN_INCHES = 27
 MIN_HZ = 120
