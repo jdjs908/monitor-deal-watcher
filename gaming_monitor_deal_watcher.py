@@ -6,7 +6,8 @@ Finds monitor deals that meet your rules and alerts you on Discord (and/or ntfy)
   - 120Hz or faster
   - QHD (1440p) or better (4K and ultrawide flagged)
   - HDR support
-  - $175 or less
+  - IPS panels (VA panels are skipped)
+  - $215 or less
 Every alert shows a 1-10 monitor score (resolution + refresh rate + size + ultrawide + price;
 any 4K monitor at 160Hz+ is a 10).
 
@@ -44,7 +45,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 # ---- your rules
-MAX_PRICE = float(os.getenv("MAX_PRICE", "200"))
+MAX_PRICE = float(os.getenv("MAX_PRICE", "215"))
 MIN_PRICE = 60.0          # ignore tiny numbers like "$25 off" or accessories
 MIN_INCHES = 27
 MIN_HZ = 120
@@ -87,12 +88,13 @@ PRICE_RE = re.compile(r"\$\s?(\d{1,3}(?:,\d{3})+(?:\.\d{2})?|\d+(?:\.\d{2})?)")
 EXPIRED_RE = re.compile(r"this deal has expired|deal has expired|expired deal", re.I)
 
 SLICKDEALS_QUERIES = [
+    "ips gaming monitor", "fast ips 1440p monitor", "ips 4k monitor", "ips ultrawide monitor",
     "gaming monitor 1440p", "gaming monitor 4k", "qhd gaming monitor", "4k 144hz monitor",
     "27 inch 165hz monitor", "27 inch 144hz monitor", "27 inch 180hz monitor", "240hz monitor",
-    "32 inch 4k monitor", "32 inch 1440p monitor", "curved gaming monitor",
+    "32 inch 4k monitor", "32 inch 1440p monitor",
     "ultrawide gaming monitor", "34 inch ultrawide monitor",
 ]
-BESTBUY_KEYWORDS = ["1440p", "qhd", "4k", "uhd", "144hz", "165hz", "180hz", "240hz", "ultrawide", "27", "32", "34"]
+BESTBUY_KEYWORDS = ["ips", "1440p", "qhd", "4k", "uhd", "144hz", "165hz", "180hz", "240hz", "ultrawide", "27", "32", "34"]
 
 
 def http_get(url, timeout=20):
@@ -199,8 +201,14 @@ def check_requirements(t):
         fails.append("no HDR")
     elif hdr is None:
         unknown.append("HDR support (needs HDR)")
-    if not parse_panel(t):
-        unknown.append("panel type (IPS/VA/OLED)")
+    panel = parse_panel(t)
+    if panel and panel[0] == "VA":
+        fails.append("VA panel")
+    elif not panel:
+        if re.search(r"\bcurved\b", t, re.I):
+            unknown.append("panel type (needs IPS - curved monitors are usually VA)")
+        else:
+            unknown.append("panel type (needs IPS - VA is excluded)")
     return fails, unknown
 
 
@@ -468,7 +476,8 @@ SELF_CHECK_CASES = [
     ('Samsung 27" Odyssey G5 QHD 1440p 165Hz HDR10 Curved Gaming Monitor', 189, True),
     ('LG 32" UltraGear 4K UHD 144Hz IPS DisplayHDR 400 Gaming Monitor', 209, True),
     ('MSI 27" 4K 160Hz Rapid IPS HDR Gaming Monitor (Refurbished)', 199, True),
-    ('Acer 34" UWQHD 3440x1440 165Hz VA HDR400 Ultrawide Gaming Monitor', 179, True),
+    ('Acer 34" UWQHD 3440x1440 165Hz IPS HDR400 Ultrawide Gaming Monitor', 199, True),
+    ('Acer 34" UWQHD 3440x1440 165Hz VA HDR400 Ultrawide Gaming Monitor', 179, False),   # VA panel
     ('27" gaming monitor 165Hz', 119, True),                                   # size/res/HDR partly unknown -> verify
     ('Samsung 27" QHD 165Hz IPS Gaming Monitor', 169, True),                    # no HDR mentioned -> verify
     ('Sceptre 27" QHD 165Hz Gaming Monitor (No HDR)', 129, False),              # says no HDR
