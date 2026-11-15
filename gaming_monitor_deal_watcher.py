@@ -44,7 +44,7 @@ from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 # ---- your rules
-MAX_PRICE = float(os.getenv("MAX_PRICE", "175"))
+MAX_PRICE = float(os.getenv("MAX_PRICE", "200"))
 MIN_PRICE = 60.0          # ignore tiny numbers like "$25 off" or accessories
 MIN_INCHES = 27
 MIN_HZ = 120
